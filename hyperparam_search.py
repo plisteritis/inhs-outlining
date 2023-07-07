@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+from sklearn.neighbors import KNeighborsClassifier
 from inhs_outlining import *
 
 from sklearn.model_selection import cross_val_score

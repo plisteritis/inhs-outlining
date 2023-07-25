@@ -1,8 +1,5 @@
 
 from werkzeug.utils import cached_property
-from PIL import Image as PILImage
-import pathlib
-import shutil
 
 from sqlalchemy import LargeBinary, String, Float, Integer, create_engine, select
 from sqlalchemy.sql import func
@@ -88,49 +85,34 @@ def make_encoding_mat(fishes):
     encodings = [fish.encoding[0] for fish in fishes]
     return pad_ragged([list(efds.ravel()) for efds in encodings])
 
+def make_contour_im2(fish, contour, colors=None):
+    from scipy.spatial import distance
+    if colors is None:
+        colors = (0xff,0xff,0xff)
+    mins = abs(np.min(contour, axis = 0))
+    maxes = np.max(contour, axis = 0)
+    ideal = np.array((fish.cropped_im.shape[0]/2, fish.cropped_im.shape[1]/2))
+    # contour_moments = cv.moments(contour)
+    # centerX = (int(contour_moments["m10"] / contour_moments["m00"]))
+    # centerY = (int(contour_moments["m01"] / contour_moments["m00"]))
+    # contour_center = (centerX, centerY)
+    # diff = (np.array(contour_center) - np.array(ideal))
+    dim = np.array([fish.cropped_im.shape[0], fish.cropped_im.shape[1]])
+    dim = np.concatenate((dim, (3,)))
+    im = np.zeros(dim)
+    together = contour - ideal
+    im = cv.drawContours(im, [contour + mins + (10,10)], -1, colors, thickness=1)
+    return im
 
-def cross(fishes, weights=None):
-    if weights is None:
-        n = len(fishes)
-        weights = [1 / n for _ in range(n)]
-    weights = np.array(weights).reshape(-1, 1)
-    encoding_mat = make_encoding_mat(fishes)
-    result = np.sum(encoding_mat * weights, axis=0)
-    return result.reshape(-1, 4)
 
-
-def synthesize_fish_from(fishes):
-    n = np.random.randint(1, len(fishes))
-    np.random.shuffle(fishes)
-    choices = fishes[:n]
-    weights = np.random.dirichlet(np.ones(n), size=1)
-    return cross(choices, weights=weights)
-
-
-def animate_morph_between(fish1, fish2, n_frames=50, speed=0.3, num_points=300):
-    # Broken!
-    frames = []
-    for i, w in enumerate(np.linspace(0, 1, n_frames)):
-        efds = cross((fish1, fish2), weights=(1 - w, w))
-        contour = reconstruct(efds, num_points, (0, 0))
-        frame = make_contour_im(contour)
-        frames.append(frame)
-    frame_dims = np.array([frame.shape for frame in frames])
-    frame_dim_max = np.array([np.max(frame_dims[:, 0]), np.max(frame_dims[:, 1])])
-    frame_dir = pathlib.Path(f"./giftemp{fish1.id}to{fish2.id}/")
-    frame_dir.mkdir(exist_ok=True)
-    for i, frame in enumerate(frames):
-        dy, dx = frame_dim_max - frame.shape
-        padded = cv.copyMakeBorder(frame, top=dy // 2, bottom=dy // 2 + (dy % 2), left=dx // 2,
-                                   right=dx // 2 + (dx % 2),
-                                   borderType=cv.BORDER_CONSTANT, value=0)
-        cv.imwrite(str(frame_dir / f"frame{i}.png"), padded)
-    del frames
-    frames = [PILImage.open(str(imf)).convert('P') for imf in frame_dir.iterdir()]
-    gif_name = f"{fish1.id}-to-{fish2.id}-{n_frames}f-{speed}spd.gif"
-    frames[0].save(gif_name, format="GIF", append_images=frames, save_all=True, duration=500, loop=0, optimize=False)
-    shutil.rmtree(frame_dir)
-
+def make_img_transparent(im):
+    im = np.uint8(im)
+    tmp = cv.cvtColor(im, cv.COLOR_BGR2GRAY)
+    _, alpha = cv.threshold(tmp, 0, 255, cv.THRESH_BINARY)
+    b, g, r = cv.split(im)
+    rgba = [b, g, r, alpha]
+    final = cv.merge(rgba)
+    return final
 
 class Base(DeclarativeBase):
     pass
@@ -298,11 +280,6 @@ class Fish(Base):
 
     @cached_property
     def primary_axis(self):
-        """
-        We've already computed this in Pepper, Karnani et. al. But I have my own version using the same method as before
-        because it uses the fish mask, and my masks are more accurate. This is also why I have my own functions for
-        area, perimeter, etc.
-        """
         points = np.argwhere(self.mask == 0xff)
         pca = PCA(n_components=2)
         pca.fit(points)
@@ -404,6 +381,39 @@ class Fish(Base):
     def save(self):
         cv.imwrite(repr(self) + ".png", cv.cvtColor(self.cropped_im, cv.COLOR_RGB2BGR))
 
+    #ajani's mask:
+    @cached_property
+    def new_outline(self):
+        #Something that is critical is getting the mask w/o the changes, just a regular mask
+        #Have to make sure it's binarized and all the necessary changes are made to the image
+        #i think we have to get all the steps up to morphological clsoing and then img flip
+        #I think we can also include the stuff with the target spatial resolution
+        #then, outlining procedure...?
+        
+        contours, _ = cv.findContours(self.new_mask, cv.RETR_LIST, cv.CHAIN_APPROX_NONE)
+        outline = max(contours, key=cv.contourArea)
+        outline = [(pt[0][0], pt[0][1]) for pt in outline]
+
+        minx = min([p[0] for p in outline])
+        target_origin = min([p for p in outline if p[0] == minx], key=lambda p: p[1])
+        outline = np.roll(outline, -outline.index(target_origin), axis=0)
+        
+        outline = np.array(outline) - np.mean(outline, axis=0)
+        outline = np.round(outline).astype(int)
+
+        return outline
+        #okay progress progress, but the image is smaller compared to the original so..
+        #maybe take aways 
+    
+    @cached_property
+    def new_mask(self):
+        result = self.mask
+        if self.side == "right":
+            result = cv.flip(result, 1)
+        _, result = cv.threshold(result, 127, 255, cv.THRESH_BINARY)
+        return result
 
 if __name__ == "__main__":
-    pass
+    fish1 = Fish.with_id("56675")
+    make_contour_im2(fish1, fish1.new_outline)
+    print()

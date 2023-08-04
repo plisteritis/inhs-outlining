@@ -7,25 +7,34 @@ from sklearn.metrics import f1_score, precision_score, recall_score, confusion_m
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-
-def load_mat(mat_file):
+# Naturally returns tuple of (encodings, labels)
+# If you opt for IDs, returns tuple of (encodings, labels, ID) 
+def load_mat(mat_file, ids = False):
     data = np.genfromtxt(mat_file, dtype=str, delimiter=',')
     np.random.seed(0)
     np.random.shuffle(data)
-    # Data matrix CSVs contain a locus X&Y in the first two columns, but we ignore those in this function
-    #regular:
-    return data[:, 2:-1].astype(float), data[:, -1]
-
-def load_mat_with_id(mat_file):
-    #should work with _new.csv files for now...
-    data = np.genfromtxt(mat_file, dtype=str, delimiter=',')
-    np.random.seed(0)
-    np.random.shuffle(data)
-    # Data matrix CSVs contain a locus X&Y in the first two columns, but we ignore those in this function
-    #for id's:
-    return data[:, 2:-2].astype(float), data[:, -2], data[:, -1]
-
-
+    
+    if ids == False:
+        try:
+            check = int(data[:, -1][0])
+            raise Exception(f"You have opted not to return the IDs of {mat_file}, "
+                            f"yet the last column of {mat_file} possesses values " \
+                            "that can be construed as numeric (i.e. IDs). " \
+                            "Please re-run the function with the added parameter of "  \
+                            "\033[1mids = true\033[0m and a way to account for the additional return value")
+        except ValueError:
+            return data[:, 2:-1].astype(float), data[:, -1]
+    if ids == True:
+        try:
+            check = int(data[:, -1][0])
+            return data[:, 2:-2].astype(float), data[:, -2], data[:, -1]
+        except ValueError:
+            raise Exception(f"You have opted for the return the IDs of {mat_file}, " \
+                            f"yet the last column of {mat_file} possesses values " \
+                            "that can not be construed as numeric (i.e. Genus and Species names). " \
+                            "Please re-run the function with the added parameter of "  \
+                            "\033[1mids = false\033[0m")
+            
 def normalize(X):
     Xn = []
     for efds in X:
@@ -128,20 +137,24 @@ def show_variation(fishes):
     contours = [recons(efds) for efds in [avg, avg + std, avg - std]]
     show_contour(*contours, colors=[(0xff, 0, 0), (0, 0, 0xff), (0xff, 0xff, 0xff)])
 
-def get_ids(mat_file):
-    return load_mat_with_id(mat_file)[2]
 
 if __name__ == "__main__":
     from sklearn.svm import SVC
     from sklearn.neighbors import KNeighborsClassifier
+    from sklearn.neural_network import MLPClassifier
+    import xgboost as xgb
     #testX, testY, testID = load_mat("1mm_seven_genera_new.csv")
-    X, Y = load_mat("1mm_seven_genera.csv")
+    X, Y, IDs = load_mat("testing_datasets/stdev/1mm_seven_genera.csv", ids = True)
     Xn = normalize(X)
-
     svm = SVC(random_state=0, kernel='linear', C=0.1, probability=True)
+    xgbooster = xgb.XGBClassifier(random_state=0, n_estimators=150, n_jobs=8)
+    mlp = MLPClassifier(random_state=0, max_iter=1000, solver="adam", alpha=0.1)    
+    knn = KNeighborsClassifier(n_neighbors=7)
     #knn = KNeighborsClassifier(n_neighbors=7)
     #run_cv_trials(knn, Xn, Y, folds=5) 
-    flops = show_notro_phena_fails(svm, Xn, Y)
-    
-
-    x2, y2, ids = load_mat_with_id("1mm_seven_genera_new.csv")
+    models  = [svm, xgbooster, mlp, knn]
+    for clf in models:
+        if clf == xgbooster:
+            run_cv_trials(xgbooster, Xn, np.unique(Y, return_inverse=True)[1], folds=5)
+        else:
+            run_cv_trials(clf, Xn, Y)

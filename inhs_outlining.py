@@ -80,11 +80,46 @@ def pad_ragged(mat):
         row += [0] * (max_row_len - len(row))
     return np.array(mat)
 
+def trunc_ragged(mat):
+    min_row_len = min(len(row) for row in mat)
+    mat = [row[:min_row_len] for row in mat]
+    return np.array(mat)
+
+def median_ragged(mat):
+    from statistics import median
+    median_row_len = int(median(len(row) for row in mat))
+    pad = lambda row, amt : row + [0] * (amt - len(row)) 
+    mat = [row[:median_row_len] if len(row) >= median_row_len else pad(row, median_row_len) for row in mat]
+    return np.array(mat)
+
+def mean_ragged(mat):
+    #TRYING OUT MEAN:
+    from statistics import mean
+    mean_row_len = int(mean(len(row) for row in mat))
+    pad = lambda row, amt : row + [0] * (amt - len(row)) 
+    mat = [row[:mean_row_len] if len(row) >= mean_row_len else pad(row, mean_row_len) for row in mat]
+    return np.array(mat)
+
+def stdev_ragged(mat):
+    #TRYING OUT STANDARD DEVIATION:
+    from statistics import stdev
+    stdev_row_len = int(stdev(len(row) for row in mat))
+    pad = lambda row, amt : row + [0] * (amt - len(row)) 
+    mat = [row[:stdev_row_len] if len(row) >= stdev_row_len else pad(row, stdev_row_len) for row in mat]
+    return np.array(mat)
+
+# "length" represents global length of descriptors for entire dataset
+# Will truncate or pad with zeros as necessary to achieve said length
+def value_ragged(mat, length):
+    pad = lambda row, amt : row + [0] * (amt - len(row)) 
+    mat = [row[:length] if len(row) >= length else pad(row, length) for row in mat]
+    return np.array(mat)
 
 def make_encoding_mat(fishes):
     encodings = [fish.encoding[0] for fish in fishes]
     return pad_ragged([list(efds.ravel()) for efds in encodings])
 
+#DELETE HER: or put it in big file w/ all other changes made
 def make_contour_im2(fish, contour, colors=None):
     from scipy.spatial import distance
     if colors is None:
@@ -381,7 +416,7 @@ class Fish(Base):
     def save(self):
         cv.imwrite(repr(self) + ".png", cv.cvtColor(self.cropped_im, cv.COLOR_RGB2BGR))
 
-    #ajani's mask:
+    #ajani's mask: I DON'T NEED YOU ANYMORE!
     @cached_property
     def new_outline(self):
         #Something that is critical is getting the mask w/o the changes, just a regular mask
@@ -414,6 +449,4 @@ class Fish(Base):
         return result
 
 if __name__ == "__main__":
-    fish1 = Fish.with_id("56675")
-    make_contour_im2(fish1, fish1.new_outline)
-    print()
+    pass

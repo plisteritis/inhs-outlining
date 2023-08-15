@@ -7,6 +7,8 @@ from sklearn.metrics import f1_score, precision_score, recall_score, confusion_m
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
+from statistics import median
+
 # Naturally returns tuple of (encodings, labels)
 # If you opt for IDs, returns tuple of (encodings, labels, ID) 
 def load_mat(mat_file, ids = False):
@@ -46,6 +48,8 @@ def normalize(X):
 def make_top_k_scorer(k):
     return lambda clf, X, Y: top_k_accuracy_score(Y, clf.predict_proba(X), k=k)
 
+def calc_target_row_len(X):
+    return int(median(np.count_nonzero(row) for row in X))
 
 f1_scorer = lambda clf, X, Y: f1_score(Y, clf.predict(X), average="weighted")
 precision_scorer = lambda clf, X, Y: precision_score(Y, clf.predict(X), average="weighted")
@@ -85,6 +89,8 @@ def run_cv_trials(clf, X, Y, folds=5, score=make_top_k_scorer(1), min_rows_per_l
     kf = KFold(n_splits=folds)
     for (train_inds, test_inds) in kf.split(X):
         Xtrain, Ytrain = X[train_inds], Y[train_inds]
+        target_row_len = calc_target_row_len(Xtrain)
+        Xtrain = Xtrain[:, :target_row_len]
         Xtrain, Ytrain = ensure_at_least_n_rows_per_label(Xtrain, Ytrain, min_rows_per_label)
         Xmean = np.mean(Xtrain, axis=0)
         Xstd = np.std(Xtrain, axis=0)
@@ -93,7 +99,7 @@ def run_cv_trials(clf, X, Y, folds=5, score=make_top_k_scorer(1), min_rows_per_l
         lda = LDA()
         Xtrain = lda.fit_transform(Xtrain, Ytrain)
         clf.fit(Xtrain, Ytrain)
-        Xtest = ((X[test_inds] - Xmean) / Xstd) @ lda.scalings_
+        Xtest = ((X[test_inds, :target_row_len] - Xmean) / Xstd) @ lda.scalings_
         scores.append(score(clf, Xtest, Y[test_inds]))
     scores = np.array(scores)
     print("avg:   %.1f%%" % (scores.mean() * 100))

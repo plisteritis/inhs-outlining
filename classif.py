@@ -7,7 +7,7 @@ from sklearn.metrics import f1_score, precision_score, recall_score, confusion_m
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from statistics import median
+from statistics import median, stdev
 
 # Naturally returns tuple of (encodings, labels)
 # If you opt for IDs, returns tuple of (encodings, labels, ID) 
@@ -51,6 +51,11 @@ def make_top_k_scorer(k):
 def calc_target_row_len(X):
     return int(median(np.count_nonzero(row) for row in X))
 
+def calc_multi_row_len(X):
+    medi = int(median(np.count_nonzero(row) for row in X))
+    stdv = int(stdev(np.count_nonzero(row) for row in X))
+    return [x for x in range(medi - stdv, medi + stdv)]
+
 f1_scorer = lambda clf, X, Y: f1_score(Y, clf.predict(X), average="weighted")
 precision_scorer = lambda clf, X, Y: precision_score(Y, clf.predict(X), average="weighted")
 recall_scorer = lambda clf, X, Y: recall_score(Y, clf.predict(X), average="weighted")
@@ -81,7 +86,6 @@ def ensure_at_least_n_rows_per_label(X, Y, n):
         Ysynth = np.concatenate((Ysynth, np.repeat(label, rows_needed)))
     return np.concatenate((X, Xsynth), axis=0), np.concatenate((Y, Ysynth))
 
-
 def run_cv_trials(clf, X, Y, folds=5, score=make_top_k_scorer(1), min_rows_per_label=0):
     print("Model:", clf)
     np.random.seed(0)
@@ -104,6 +108,41 @@ def run_cv_trials(clf, X, Y, folds=5, score=make_top_k_scorer(1), min_rows_per_l
     scores = np.array(scores)
     print("avg:   %.1f%%" % (scores.mean() * 100))
     print("std:   %.1f%%" % (scores.std() * 100))
+
+def run_cv_trials_altered(clf, X, Y, folds=5, score=make_top_k_scorer(1), min_rows_per_label=0):
+    np.random.seed(0)
+    scores = []
+    kf = KFold(n_splits=folds)
+   
+    big_scores = []
+    row_length = 0
+    for nummy in range(0, 80):
+        scores=[]
+        for (train_inds, test_inds) in kf.split(X):
+            Xtrain, Ytrain = X[train_inds], Y[train_inds]
+            target_row_len = calc_multi_row_len(Xtrain)[nummy]
+            row_length = target_row_len
+            Xtrain = Xtrain[:, :target_row_len]
+            Xtrain, Ytrain = ensure_at_least_n_rows_per_label(Xtrain, Ytrain, min_rows_per_label)
+            Xmean = np.mean(Xtrain, axis=0)
+            Xstd = np.std(Xtrain, axis=0)
+            Xstd[Xstd == 0] = 1
+            Xtrain = (Xtrain - Xmean) / Xstd
+            lda = LDA()
+            Xtrain = lda.fit_transform(Xtrain, Ytrain)
+            clf.fit(Xtrain, Ytrain)
+            Xtest = ((X[test_inds, :target_row_len] - Xmean) / Xstd) @ lda.scalings_
+            scores.append(score(clf, Xtest, Y[test_inds]))
+        scores = np.array(scores)
+        one_length_mean = scores.mean() * 100
+        one_length_std = scores.std() * 100
+        big_scores.append((one_length_mean, one_length_std, row_length))
+    max_score = max(big_scores)
+    return(max_score)
+    #so we get the highest row length
+    #with the highest score
+
+    
 
 
 def show_confusion_mat(clf, X, Y, folds=5):
@@ -149,18 +188,37 @@ if __name__ == "__main__":
     from sklearn.neighbors import KNeighborsClassifier
     from sklearn.neural_network import MLPClassifier
     import xgboost as xgb
-    #testX, testY, testID = load_mat("1mm_seven_genera_new.csv")
-    X, Y, IDs = load_mat("testing_datasets/stdev/1mm_seven_genera.csv", ids = True)
+
+    X, Y = load_mat("1mm_seven_genera.csv")
     Xn = normalize(X)
     svm = SVC(random_state=0, kernel='linear', C=0.1, probability=True)
     xgbooster = xgb.XGBClassifier(random_state=0, n_estimators=150, n_jobs=8)
     mlp = MLPClassifier(random_state=0, max_iter=1000, solver="adam", alpha=0.1)    
     knn = KNeighborsClassifier(n_neighbors=7)
-    #knn = KNeighborsClassifier(n_neighbors=7)
-    #run_cv_trials(knn, Xn, Y, folds=5) 
+    
+    
     models  = [svm, xgbooster, mlp, knn]
+    # scores = []
+    # for clf in models:
+    #     if clf == xgbooster:
+    #         scores.append(run_cv_trials_altered(xgbooster, Xn, np.unique(Y, return_inverse=True)[1], folds=5))
+    #     else:
+    #         scores.append(run_cv_trials_altered(clf, Xn, Y))
+
+    # highest = max(scores)
+    # model = models[scores.index(highest)]
+    # print(model, highest)
+
+    #Normal testing procedures (median length):
+    # for clf in models:
+    #     if clf == xgbooster:
+    #         run_cv_trials(clf, Xn, np.unique(Y, return_inverse=True)[1], folds=5)
+    #     else:
+    #         run_cv_trials(clf, Xn, Y)
+    
+    #Finding best length procedure:
     for clf in models:
         if clf == xgbooster:
-            run_cv_trials(xgbooster, Xn, np.unique(Y, return_inverse=True)[1], folds=5)
+            print(clf, run_cv_trials_altered(clf, Xn, np.unique(Y, return_inverse=True)[1], folds=5))
         else:
-            run_cv_trials(clf, Xn, Y)
+            print(clf, run_cv_trials(clf, Xn, Y))

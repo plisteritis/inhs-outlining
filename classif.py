@@ -221,4 +221,4 @@ if __name__ == "__main__":
         if clf == xgbooster:
             print(clf, run_cv_trials_altered(clf, Xn, np.unique(Y, return_inverse=True)[1], folds=5))
         else:
-            print(clf, run_cv_trials(clf, Xn, Y))
+            print(clf, run_cv_trials_altered(clf, Xn, Y))
